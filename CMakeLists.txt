@@ -11,6 +11,7 @@ set(TORCH_EXTENSION_NAME _cuda_playground)
 find_package(Torch REQUIRED)
 find_package(PythonExtensions REQUIRED)
 find_library(TORCH_PYTHON_LIBRARY torch_python PATHS "${TORCH_INSTALL_PREFIX}/lib")
+# find_package(CUDAToolkit)
 
 set(CMAKE_CXXFLAGS ${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS})
 

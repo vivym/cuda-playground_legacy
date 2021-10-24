@@ -3,7 +3,9 @@ import time
 import numpy as np
 import torch
 
-from ._cuda_playground import window_partition
+from ._cuda_playground import window_partition, sort_perf
+
+__all__ = ["window_partition", "sort_perf"]
 
 
 def main():
@@ -21,6 +23,12 @@ def main():
         times.append(time.time() - start)
 
     print(np.mean(times))
+    """
+    sorted_indices, output_window_ids, window_sizes = window_partition(window_ids)
+    print(window_ids[:100])
+    print(sorted_indices[:100])
+    """
+    print(output_window_ids)
 
     print(sorted_indices.shape)
     print(output_window_ids.shape)
