@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from cuda_playground.window_partition import window_partition, sort_perf
+from cuda_playground.vbmm import vbmm
 
 
 class SimpleTestCase(unittest.TestCase):
@@ -28,9 +29,12 @@ class RealTestCase(unittest.TestCase):
         time_reorder_features = 0
         time_new_tensor, time_sort, time_reduce_by_key = 0, 0, 0
         time_sort_perf1, time_sort_perf2 = 0, 0
+        time_mC_offsets, time_mC_size, time_plus_addr, time_gemm = 0, 0, 0, 0
         for stage in range(3):
             for layer in range(2):
                 features, coords = data[stage][layer]
+
+                num_channels = features.shape[1]
 
                 # sda
 
@@ -48,7 +52,7 @@ class RealTestCase(unittest.TestCase):
                 time_sort_perf2 += time_sort_perf2_
 
                 start_time = time.time()
-                sorted_indices, output_window_ids, _, (time_new_tensor_, time_sort_, time_reduce_by_key_) = window_partition(window_ids)
+                sorted_indices, output_window_ids, window_sizes, (time_new_tensor_, time_sort_, time_reduce_by_key_) = window_partition(window_ids)
                 time_window_partition += time.time() - start_time
                 time_new_tensor += time_new_tensor_
                 time_sort += time_sort_
@@ -57,6 +61,25 @@ class RealTestCase(unittest.TestCase):
                 start_time = time.time()
                 features = features[sorted_indices.long()]
                 time_reorder_features += time.time() - start_time
+
+                batch_size = output_window_ids.shape[0]
+                m = n = window_sizes
+                k = torch.full((batch_size + 1,), num_channels, dtype=torch.int32, device=torch.device("cuda"))
+
+                mA_offsets = torch.zeros(batch_size, dtype=torch.int32, device=torch.device("cuda"))
+                mA_offsets[1:] = torch.cumsum(window_sizes[:-1], dim=0)
+                mB_offsets = torch.zeros(batch_size, dtype=torch.int32, device=torch.device("cuda"))
+                mB_offsets[1:] = torch.cumsum(window_sizes[:-1], dim=0)
+
+                attention, mC_offsets, mC_m, mC_n, _, time_mC_offsets_, time_mC_size_, time_plus_addr_, time_gemm_ = vbmm(
+                    False, True,
+                    (features, mA_offsets, m, k, batch_size),
+                    (features, mB_offsets, n, k, batch_size),
+                )
+                time_mC_offsets += time_mC_offsets_
+                time_mC_size += time_mC_size_
+                time_plus_addr += time_plus_addr_
+                time_gemm += time_gemm_
 
                 # lda
 
@@ -83,13 +106,14 @@ class RealTestCase(unittest.TestCase):
             time_window_ids * 1000, time_window_partition * 1000, time_reorder_features * 1000,
             time_new_tensor, time_sort, time_reduce_by_key,
             time_sort_perf1, time_sort_perf2,
+            time_mC_offsets, time_mC_size, time_plus_addr, time_gemm
         )
 
     def test(self):
         window_sizes1 = torch.as_tensor([1, 6, 4, 4], dtype=torch.int32, device=torch.device("cuda"))
         window_sizes2 = torch.as_tensor([1, 2, 8, 8], dtype=torch.int32, device=torch.device("cuda"))
         root_dir = Path("datasets") / "test_tensor"
-        for split in ["test_tensor_batch_size1", "test_tensor_batch_size4"]:
+        for split in ["test_tensor_batch_size4", "test_tensor_batch_size1"]:
             tensor_dir = root_dir / split
             times = []
             for filename in tqdm(list(tensor_dir.glob("sample_*"))):
